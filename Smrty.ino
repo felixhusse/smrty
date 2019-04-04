@@ -1,4 +1,4 @@
-#include <FS.h>
+^#include <FS.h>
 
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 #include <DNSServer.h>
@@ -9,11 +9,10 @@
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+#include <PubSubClient.h>
 
 //#define SEALEVELPRESSURE_HPA:1013.25;
-//#define AIO_FINGERPRINT: "77 00 54 2D DA E7 D8 03 27 31 23 99 EB 27 DB CB A5 4C 57 18";
 
-// Our configuration structure.
 struct Config {
   char host[64];
   char port[6];
@@ -29,6 +28,9 @@ bool shouldSaveConfig = false;
 Config config;                         // <- global configuration object
 Adafruit_BME280 bme;
 
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
 void loadConfiguration(const char *filename, Config &config);
 void saveConfiguration(const char *filename, const Config &config);
 
@@ -43,12 +45,56 @@ void setupSensor() {
   delay(100); // let sensor boot up
 }
 
-void verifyFingerprint() {
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived");
   
 }
 
+void reconnect() {
+  // Loop until we're reconnected
+  while (!mqttClient.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "Smrty-";
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    if (mqttClient.connect(clientId.c_str())) {
+      Serial.println("connected");
+      mqttClient.subscribe("controll");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
 void sendData() {
-  
+  char temperature[64];
+  char humidity[64];
+  char pressure[64];
+
+  char temperatureString[6];
+  char humidityString[6];
+  char pressureString[7];
+
+  dtostrf(bme.readTemperature(), 5, 1, temperatureString);
+  dtostrf(bme.readHumidity(), 5, 1, humidityString);
+  dtostrf(bme.readPressure()/100.0F, 6, 1, pressureString);
+
+  strcpy(temperature,config.groupname);
+  strcpy(humidity,config.groupname);
+  strcpy(pressure,config.groupname);
+
+  strcat(temperature,"/temperature");
+  strcat(pressure,"/pressure");
+  strcat(humidity,"/humidity");
+
+  mqttClient.publish(temperature, temperatureString);
+  mqttClient.publish(pressure, humidityString);
+  mqttClient.publish(humidity, pressureString);
 }
 
 void saveConfigCallback() {
@@ -88,6 +134,7 @@ void setupWifiManager() {
 
 void setup() {
   Serial.begin(115200);
+
   Serial.println(F("Starting Smrty Sensor...."));
   if (!SPIFFS.begin()) {
     Serial.println("Failed to mount file system");
@@ -97,17 +144,31 @@ void setup() {
   loadConfiguration(configFilename, config);
   Serial.println(F("Starting WifiManager"));
   setupWifiManager();
-  
+
   if (shouldSaveConfig) {
     Serial.println(F("Saving configuration..."));
-    saveConfiguration(configFilename, config);  
+    saveConfiguration(configFilename, config);
   }
   Serial.println("local ip");
   Serial.println(WiFi.localIP());
+  Serial.println("setup Sensor");
+  setupSensor();
+  Serial.println("Setup mqtt client");
+  
+  int portNumber = atoi(config.port);
+  mqttClient.setServer(config.host, portNumber);
+  mqttClient.setCallback(callback);
 }
 
 void loop() {
-  // not used in this example
+  if (!mqttClient.connected()) {
+    reconnect();
+  }
+  mqttClient.loop();
+  Serial.println("Publish message... ");
+  sendData();
+
+  ESP.deepSleep(30e6);
 }
 
 // Loads the configuration from a file

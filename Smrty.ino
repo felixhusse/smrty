@@ -1,4 +1,4 @@
-^#include <FS.h>
+#include <FS.h>
 
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 #include <DNSServer.h>
@@ -21,6 +21,11 @@ struct Config {
   char groupname[64];
 };
 
+char temperatureTopic[128];
+char pressureTopic[128];
+char humidityTopic[128];
+long lastMsg = 0;
+
 const char *configFilename = "/configsmrty.json";  // <- SD library uses 8.3 filenames
 const size_t configCapacity = JSON_OBJECT_SIZE(10) + 310;
 bool shouldSaveConfig = false;
@@ -28,6 +33,7 @@ bool shouldSaveConfig = false;
 Config config;                         // <- global configuration object
 Adafruit_BME280 bme;
 
+WiFiManager wifiManager;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
@@ -47,7 +53,8 @@ void setupSensor() {
 
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived");
-  
+  wifiManager.resetSettings();
+  ESP.reset();
 }
 
 void reconnect() {
@@ -60,7 +67,7 @@ void reconnect() {
     // Attempt to connect
     if (mqttClient.connect(clientId.c_str())) {
       Serial.println("connected");
-      mqttClient.subscribe("controll");
+      mqttClient.subscribe("smrty/control");
     } else {
       Serial.print("failed, rc=");
       Serial.print(mqttClient.state());
@@ -72,10 +79,6 @@ void reconnect() {
 }
 
 void sendData() {
-  char temperature[64];
-  char humidity[64];
-  char pressure[64];
-
   char temperatureString[6];
   char humidityString[6];
   char pressureString[7];
@@ -84,17 +87,9 @@ void sendData() {
   dtostrf(bme.readHumidity(), 5, 1, humidityString);
   dtostrf(bme.readPressure()/100.0F, 6, 1, pressureString);
 
-  strcpy(temperature,config.groupname);
-  strcpy(humidity,config.groupname);
-  strcpy(pressure,config.groupname);
-
-  strcat(temperature,"/temperature");
-  strcat(pressure,"/pressure");
-  strcat(humidity,"/humidity");
-
-  mqttClient.publish(temperature, temperatureString);
-  mqttClient.publish(pressure, humidityString);
-  mqttClient.publish(humidity, pressureString);
+  mqttClient.publish(temperatureTopic, temperatureString);
+  mqttClient.publish(pressureTopic, humidityString);
+  mqttClient.publish(humidityTopic, pressureString);
 }
 
 void saveConfigCallback() {
@@ -107,7 +102,7 @@ void setupWifiManager() {
   WiFiManagerParameter custom_username("username", "username", config.username, 64);
   WiFiManagerParameter custom_key("key", "key", config.key, 64);
   WiFiManagerParameter custom_groupname("groupname", "groupname", config.groupname, 64);
-  WiFiManager wifiManager;
+
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
   //add all your parameters here
@@ -154,10 +149,22 @@ void setup() {
   Serial.println("setup Sensor");
   setupSensor();
   Serial.println("Setup mqtt client");
-  
+
   int portNumber = atoi(config.port);
   mqttClient.setServer(config.host, portNumber);
   mqttClient.setCallback(callback);
+
+  strcpy(temperatureTopic,"smrty/sensor/");
+  strcpy(humidityTopic,"smrty/sensor/");
+  strcpy(pressureTopic,"smrty/sensor/");
+
+  strcat(temperatureTopic,config.groupname);
+  strcat(humidityTopic,config.groupname);
+  strcat(pressureTopic,config.groupname);
+
+  strcat(temperatureTopic,"/temperature");
+  strcat(pressureTopic,"/pressure");
+  strcat(humidityTopic,"/humidity");
 }
 
 void loop() {
@@ -165,10 +172,13 @@ void loop() {
     reconnect();
   }
   mqttClient.loop();
-  Serial.println("Publish message... ");
-  sendData();
 
-  ESP.deepSleep(30e6);
+  long now = millis();
+  if (now - lastMsg > 30000) {
+    lastMsg = now;
+    Serial.println("Publish message... ");
+    sendData();
+  }
 }
 
 // Loads the configuration from a file

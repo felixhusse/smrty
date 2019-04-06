@@ -26,7 +26,8 @@ char pressureTopic[128];
 char humidityTopic[128];
 long lastMsg = 0;
 
-const char *configFilename = "/configsmrty.json";  // <- SD library uses 8.3 filenames
+const char *fingerprint = "E3 9D 8B B4 2C FF 51 DD 75 91 93 3A 7B 54 6A 30 36 7D 09 2D";
+const char *configFilename = "/configsmrty.json";  
 const size_t configCapacity = JSON_OBJECT_SIZE(10) + 310;
 bool shouldSaveConfig = false;
 
@@ -34,7 +35,7 @@ Config config;                         // <- global configuration object
 Adafruit_BME280 bme;
 
 WiFiManager wifiManager;
-WiFiClient espClient;
+WiFiClientSecure espClient;
 PubSubClient mqttClient(espClient);
 
 void loadConfiguration(const char *filename, Config &config);
@@ -49,6 +50,22 @@ void setupSensor() {
       while (1);
   }
   delay(100); // let sensor boot up
+}
+
+void verifyFingerprint() {
+  Serial.print("Connecting to ");
+  Serial.println(config.host);
+  espClient.setFingerprint(fingerprint);
+  int portNumber = atoi(config.port);
+  if (!espClient.connect(config.host, portNumber)) {
+    Serial.println("Connection failed. Halting execution.");
+    return;
+  }
+  if (espClient.verify(fingerprint, config.host)) {
+    Serial.println("certificate matches");
+  } else {
+    Serial.println("certificate doesn't match");
+  }
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -150,6 +167,8 @@ void setup() {
   setupSensor();
   Serial.println("Setup mqtt client");
 
+  verifyFingerprint();
+  
   int portNumber = atoi(config.port);
   mqttClient.setServer(config.host, portNumber);
   mqttClient.setCallback(callback);

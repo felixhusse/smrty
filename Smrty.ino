@@ -12,6 +12,7 @@
 #include <PubSubClient.h>
 
 //#define SEALEVELPRESSURE_HPA:1013.25;
+#define MQTT_SOCKET_TIMEOUT 60
 
 struct Config {
   char host[64];
@@ -82,9 +83,11 @@ void reconnect() {
     // Create a random client ID
     String clientId = "Smrty-";
     clientId += String(random(0xffff), HEX);
+    
     // Attempt to connect
     if (mqttClient.connect(clientId.c_str())) {
       Serial.println("connected");
+      Serial.println(clientId);
       mqttClient.subscribe("smrty/control");
     } else {
       Serial.print("failed, rc=");
@@ -106,8 +109,8 @@ void sendData() {
   dtostrf(bme.readPressure()/100.0F, 6, 1, pressureString);
 
   mqttClient.publish(temperatureTopic, temperatureString);
-  mqttClient.publish(pressureTopic, humidityString);
-  mqttClient.publish(humidityTopic, pressureString);
+  mqttClient.publish(pressureTopic, pressureString);
+  mqttClient.publish(humidityTopic, humidityString);
 }
 
 void saveConfigCallback() {
@@ -192,16 +195,36 @@ void setup() {
 
 void loop() {
   if (!mqttClient.connected()) {
-    reconnect();
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "Smrty-";
+    clientId += String(random(0xffff), HEX);
+    
+    // Attempt to connect
+    if (mqttClient.connect(clientId.c_str())) {
+      Serial.println("connected");
+      Serial.println(clientId);
+      mqttClient.subscribe("smrty/control");
+      mqttClient.loop();
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
   }
-  mqttClient.loop();
+  else {
+    long now = millis();
+    if (now - lastMsg > 10000) {
+      lastMsg = now;
+      Serial.println("Publish message.");
+      sendData();
+    }
+  }
 
-  long now = millis();
-  if (now - lastMsg > 30000) {
-    lastMsg = now;
-    Serial.println("Publish message.");
-    sendData();
-  }
+  
+  
 }
 
 // Loads the configuration from a file

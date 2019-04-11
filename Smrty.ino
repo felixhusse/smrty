@@ -17,8 +17,9 @@ struct Config {
   char host[64];
   char port[6];
   char username[64];
-  char key[64];
+  char password[64];
   char groupname[64];
+  char fingerprint[64];
 };
 
 char temperatureTopic[128];
@@ -27,7 +28,7 @@ char humidityTopic[128];
 long lastMsg = 0;
 
 const char *fingerprint = "E3 9D 8B B4 2C FF 51 DD 75 91 93 3A 7B 54 6A 30 36 7D 09 2D";
-const char *configFilename = "/configsmrty.json";  
+const char *configFilename = "/configsmrty.json";
 const size_t configCapacity = JSON_OBJECT_SIZE(10) + 310;
 bool shouldSaveConfig = false;
 
@@ -35,8 +36,8 @@ Config config;                         // <- global configuration object
 Adafruit_BME280 bme;
 
 WiFiManager wifiManager;
-WiFiClientSecure espClient;
-PubSubClient mqttClient(espClient);
+WiFiClientSecure secureClient;
+PubSubClient mqttClient(secureClient);
 
 void loadConfiguration(const char *filename, Config &config);
 void saveConfiguration(const char *filename, const Config &config);
@@ -55,13 +56,13 @@ void setupSensor() {
 void verifyFingerprint() {
   Serial.print("Connecting to ");
   Serial.println(config.host);
-  espClient.setFingerprint(fingerprint);
+  secureClient.setFingerprint(config.fingerprint);
   int portNumber = atoi(config.port);
-  if (!espClient.connect(config.host, portNumber)) {
+  if (!secureClient.connect(config.host, portNumber)) {
     Serial.println("Connection failed. Halting execution.");
     return;
   }
-  if (espClient.verify(fingerprint, config.host)) {
+  if (secureClient.verify(config.fingerprint, config.host)) {
     Serial.println("certificate matches");
   } else {
     Serial.println("certificate doesn't match");
@@ -117,8 +118,9 @@ void setupWifiManager() {
   WiFiManagerParameter custom_hostname("hostname", "hostname", config.host, 64);
   WiFiManagerParameter custom_port("port", "port", config.port, 6);
   WiFiManagerParameter custom_username("username", "username", config.username, 64);
-  WiFiManagerParameter custom_key("key", "key", config.key, 64);
+  WiFiManagerParameter custom_password("password", "password", config.password, 64);
   WiFiManagerParameter custom_groupname("groupname", "groupname", config.groupname, 64);
+  WiFiManagerParameter custom_fingerprint("fingerprint", "fingerprint", config.fingerprint, 64);
 
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
@@ -126,8 +128,9 @@ void setupWifiManager() {
   wifiManager.addParameter(&custom_hostname);
   wifiManager.addParameter(&custom_port);
   wifiManager.addParameter(&custom_username);
-  wifiManager.addParameter(&custom_key);
+  wifiManager.addParameter(&custom_password);
   wifiManager.addParameter(&custom_groupname);
+  wifiManager.addParameter(&custom_fingerprint);
 
   if (!wifiManager.autoConnect("AutoConnectAP", "superpassword")) {
     Serial.println("failed to connect and hit timeout");
@@ -140,8 +143,9 @@ void setupWifiManager() {
   strcpy(config.host, custom_hostname.getValue());
   strcpy(config.port, custom_port.getValue());
   strcpy(config.username, custom_username.getValue());
-  strcpy(config.key, custom_key.getValue());
+  strcpy(config.password, custom_password.getValue());
   strcpy(config.groupname, custom_groupname.getValue());
+  strcpy(config.fingerprint, custom_fingerprint.getValue());
 }
 
 void setup() {
@@ -168,7 +172,7 @@ void setup() {
   Serial.println("Setup mqtt client");
 
   verifyFingerprint();
-  
+
   int portNumber = atoi(config.port);
   mqttClient.setServer(config.host, portNumber);
   mqttClient.setCallback(callback);
@@ -195,7 +199,7 @@ void loop() {
   long now = millis();
   if (now - lastMsg > 30000) {
     lastMsg = now;
-    Serial.println("Publish message... ");
+    Serial.println("Publish message.");
     sendData();
   }
 }
@@ -220,12 +224,15 @@ void loadConfiguration(const char *filename, Config &config) {
   strlcpy(config.username,                  // <- destination
           doc["username"] | "",  // <- source
           sizeof(config.username));         // <- destination's capacity
-  strlcpy(config.key,                  // <- destination
-          doc["key"] | "",             // <- source
-          sizeof(config.key));         // <- destination's capacity
+  strlcpy(config.password,                  // <- destination
+          doc["password"] | "",             // <- source
+          sizeof(config.password));         // <- destination's capacity
   strlcpy(config.groupname,                  // <- destination
           doc["groupname"] | "wohnzimmer",  // <- source
           sizeof(config.groupname));         // <- destination's capacity
+  strlcpy(config.fingerprint,                  // <- destination
+          doc["fingerprint"] | "E3 9D 8B B4 2C FF 51 DD 75 91 93 3A 7B 54 6A 30 36 7D 09 2D",  // <- source
+          sizeof(config.fingerprint));         // <- destination's capacity
   // Close the file (Curiously, File's destructor doesn't close the file)
   file.close();
 }
@@ -247,9 +254,9 @@ void saveConfiguration(const char *filename, const Config &config) {
   doc["hostname"] = config.host;
   doc["port"] = config.port;
   doc["username"] = config.username;
-  doc["key"] = config.key;
+  doc["password"] = config.password;
   doc["groupname"] = config.groupname;
-
+  doc["fingerprint"] = config.fingerprint;
   // Serialize JSON to file
   if (serializeJson(doc, file) == 0) {
     Serial.println(F("Failed to write to file"));

@@ -26,6 +26,7 @@ struct Config {
 char temperatureTopic[128];
 char pressureTopic[128];
 char humidityTopic[128];
+char controlTopic[128];
 long lastMsg = 0;
 
 const char *fingerprint = "E3 9D 8B B4 2C FF 51 DD 75 91 93 3A 7B 54 6A 30 36 7D 09 2D";
@@ -183,14 +184,17 @@ void setup() {
   strcpy(temperatureTopic,"smrty/sensor/");
   strcpy(humidityTopic,"smrty/sensor/");
   strcpy(pressureTopic,"smrty/sensor/");
-
+  strcpy(controlTopic,"smrty/sensor/");
+  
   strcat(temperatureTopic,config.groupname);
   strcat(humidityTopic,config.groupname);
   strcat(pressureTopic,config.groupname);
-
+  strcat(controlTopic,config.groupname);
+  
   strcat(temperatureTopic,"/temperature");
   strcat(pressureTopic,"/pressure");
   strcat(humidityTopic,"/humidity");
+  strcat(controlTopic,"/control");
 }
 
 void loop() {
@@ -204,8 +208,8 @@ void loop() {
     if (mqttClient.connect(clientId.c_str())) {
       Serial.println("connected");
       Serial.println(clientId);
-      mqttClient.subscribe("smrty/control");
-      mqttClient.loop();
+      mqttClient.subscribe(controlTopic);
+      
     } else {
       Serial.print("failed, rc=");
       Serial.print(mqttClient.state());
@@ -215,6 +219,7 @@ void loop() {
     }
   }
   else {
+    mqttClient.loop();
     long now = millis();
     if (now - lastMsg > 10000) {
       lastMsg = now;
